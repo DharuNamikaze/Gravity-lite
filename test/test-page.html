@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gravity Test Page — Intentional UI Bugs</title>
+  <style>
+    /* ── Reset & base ──────────────────────────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f5f5f5;
+      padding: 24px;
+      color: #222;
+    }
+
+    h1 { font-size: 22px; margin-bottom: 8px; }
+    h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #555; letter-spacing: .05em; text-transform: uppercase; }
+    .section {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .section-label {
+      display: inline-block;
+      background: #ef4444;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      letter-spacing: .05em;
+    }
+    .selector-hint {
+      font-family: monospace;
+      font-size: 11px;
+      background: #f3f4f6;
+      padding: 4px 8px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      display: inline-block;
+      color: #6b7280;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 1: display:none — element is invisible, diagnose_layout should catch
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-display-none {
+      display: none;
+      background: #fee2e2;
+      padding: 16px;
+      border: 2px solid #ef4444;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 2: visibility:hidden — invisible but still takes space
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-visibility-hidden {
+      visibility: hidden;
+      background: #fef9c3;
+      padding: 16px;
+      border: 2px solid #eab308;
+      height: 48px;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 3: opacity:0 — invisible but interactive (dangerous)
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-opacity-zero {
+      opacity: 0;
+      background: #d1fae5;
+      padding: 16px;
+      border: 2px solid #10b981;
+      height: 48px;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 4: overflow:hidden clipping children
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-overflow-hidden {
+      overflow: hidden;
+      width: 200px;
+      height: 50px;
+      background: #e0e7ff;
+      border: 2px solid #6366f1;
+      position: relative;
+    }
+    #bug-overflow-hidden .child {
+      width: 400px;
+      height: 80px;
+      background: #6366f1;
+      color: white;
+      padding: 8px;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 5: z-index on static element (has no effect)
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-zindex-static {
+      /* position is static (default) — z-index does nothing here */
+      z-index: 9999;
+      background: #ffe4e6;
+      padding: 16px;
+      border: 2px solid #f43f5e;
+      color: #be123c;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 6: z-index trapped by parent stacking context
+       Parent has transform → creates stacking context → child z-index trapped
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-zindex-parent {
+      position: relative;
+      /* transform creates a stacking context — child z-index is trapped */
+      transform: translateZ(0);
+      background: #fdf4ff;
+      padding: 20px;
+      border: 2px solid #a855f7;
+      height: 100px;
+    }
+    #bug-zindex-child {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 9999; /* trapped — can't escape parent stacking context */
+      background: #a855f7;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 4px;
+    }
+    #bug-zindex-sibling {
+      position: relative;
+      z-index: 1;
+      background: #7c3aed;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 4px;
+      margin-top: 8px;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 7: Bad color contrast (fails WCAG AA)
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-contrast-fail {
+      color: #aaaaaa;        /* light gray text */
+      background-color: #ffffff; /* white background → ratio ~2.3:1, needs 4.5 */
+      padding: 16px;
+      border: 2px solid #aaa;
+      font-size: 16px;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 8: Small touch target (below 44×44px)
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-small-touch {
+      width: 20px;
+      height: 20px;
+      background: #3b82f6;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 9: pointer-events:none — unclickable button
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-pointer-none {
+      pointer-events: none;
+      background: #f97316;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 10: Fixed pixel width — will break on mobile
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-fixed-width {
+      width: 1200px; /* hard-coded wide — overflows on any normal screen */
+      background: #ecfdf5;
+      padding: 16px;
+      border: 2px solid #10b981;
+      overflow: visible;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 11: Unresolved CSS variable
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-css-var {
+      /* --missing-color is never defined anywhere */
+      background-color: var(--missing-color, #fffbeb);
+      color: var(--missing-text-color); /* this one has no fallback */
+      padding: 16px;
+      border: 2px solid #f59e0b;
+      font-size: 16px;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 12: Flex container with no height — children invisible/collapsed
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-flex-no-height {
+      display: flex;
+      height: 0; /* oops — container is collapsed */
+      background: #f0fdf4;
+      border: 2px solid #4ade80;
+      overflow: hidden;
+    }
+    #bug-flex-no-height .flex-item {
+      flex: 1;
+      background: #4ade80;
+      padding: 16px;
+      color: #14532d;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 13: Flex children with min-width:auto causing overflow
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-flex-overflow {
+      display: flex;
+      width: 300px;
+      border: 2px solid #f59e0b;
+      background: #fffbeb;
+      overflow: hidden;
+    }
+    #bug-flex-overflow .flex-item-overflow {
+      /* no min-width:0 — will not shrink below content size → overflows */
+      flex: 1;
+      background: #fde68a;
+      padding: 8px;
+      white-space: nowrap; /* long content won't wrap */
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 14: Grid with no template defined
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-grid-no-template {
+      display: grid;
+      /* no grid-template-columns or rows — everything stacks in single column */
+      gap: 8px;
+      background: #f0f9ff;
+      padding: 12px;
+      border: 2px solid #38bdf8;
+    }
+    #bug-grid-no-template .grid-item {
+      background: #38bdf8;
+      padding: 12px;
+      color: white;
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 15: Element off-screen to the right (left: overflow)
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-offscreen-right {
+      position: absolute;
+      left: 9999px; /* way off screen */
+      top: 0;
+      background: #fee2e2;
+      padding: 16px;
+      border: 2px solid #ef4444;
+      width: 200px;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       BUG 16: Magic number z-index (will be flagged as suspicious)
+    ──────────────────────────────────────────────────────────────────────── */
+    #bug-magic-zindex {
+      position: relative;
+      z-index: 99999;
+      background: #fdf2f8;
+      padding: 16px;
+      border: 2px solid #ec4899;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────
+       Wrapper for offscreen demo (contains the overflow)
+    ──────────────────────────────────────────────────────────────────────── */
+    #offscreen-wrapper {
+      position: relative;
+      height: 60px;
+      overflow: hidden;
+      background: #fee2e2;
+      border: 2px dashed #ef4444;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>⚡ Gravity Test Page</h1>
+  <p style="color:#6b7280; margin-bottom:24px; font-size:13px;">
+    Every section below has an intentional bug. Use Gravity MCP tools to detect them.
+  </p>
+
+  <!-- ── BUG 1: display:none ─────────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 1 — display:none</div><br>
+    <code class="selector-hint">selector: "#bug-display-none"</code>
+    <div id="bug-display-none">
+      This element has display:none — you can't see it but Gravity should detect it.
+    </div>
+    <p style="color:#888; font-size:13px;">⬆ Nothing visible above — that's the bug. Run <code>diagnose_layout</code>.</p>
+  </div>
+
+  <!-- ── BUG 2: visibility:hidden ────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 2 — visibility:hidden</div><br>
+    <code class="selector-hint">selector: "#bug-visibility-hidden"</code>
+    <div id="bug-visibility-hidden">This box is hidden but still takes up space</div>
+    <p style="color:#888; font-size:13px;">⬆ Blank space above — element is there but invisible. Run <code>diagnose_layout</code>.</p>
+  </div>
+
+  <!-- ── BUG 3: opacity:0 ────────────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 3 — opacity:0 (invisible but interactive!)</div><br>
+    <code class="selector-hint">selector: "#bug-opacity-zero"</code>
+    <div id="bug-opacity-zero">Invisible but still receives click events — dangerous bug!</div>
+    <p style="color:#888; font-size:13px;">⬆ Blank space — opacity:0 makes it invisible but keeps it interactive. Run <code>diagnose_layout</code>.</p>
+  </div>
+
+  <!-- ── BUG 4: overflow:hidden clipping ─────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 4 — overflow:hidden clipping content</div><br>
+    <code class="selector-hint">selector: "#bug-overflow-hidden"</code>
+    <div id="bug-overflow-hidden">
+      <div class="child">This child is 400px wide but the container is only 200px — rest is clipped!</div>
+    </div>
+  </div>
+
+  <!-- ── BUG 5: z-index on static ────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 5 — z-index on position:static (no effect)</div><br>
+    <code class="selector-hint">selector: "#bug-zindex-static"</code>
+    <div id="bug-zindex-static">
+      This element has <strong>z-index: 9999</strong> but <strong>position: static</strong> — z-index does nothing.
+      Developer thinks it's on top but it isn't.
+    </div>
+  </div>
+
+  <!-- ── BUG 6: z-index trapped by stacking context ───────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 6 — z-index trapped inside parent stacking context</div><br>
+    <code class="selector-hint">selector: "#bug-zindex-child" (inspect_stacking)</code>
+    <div id="bug-zindex-parent">
+      <div id="bug-zindex-child">z-index: 9999 — TRAPPED by parent transform</div>
+      <div id="bug-zindex-sibling">z-index: 1 — sibling, appears above trapped child</div>
+    </div>
+    <p style="color:#888; font-size:13px; margin-top:8px;">Parent has <code>transform: translateZ(0)</code> — creates stacking context, traps child's z-index.</p>
+  </div>
+
+  <!-- ── BUG 7: Color contrast failure ────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 7 — WCAG color contrast failure (AA)</div><br>
+    <code class="selector-hint">selector: "#bug-contrast-fail" (check_accessibility)</code>
+    <div id="bug-contrast-fail">
+      This text is light gray (#aaaaaa) on white (#ffffff). Contrast ratio ≈ 2.3:1.
+      WCAG AA requires 4.5:1 for normal text. Many users with low vision cannot read this.
+    </div>
+  </div>
+
+  <!-- ── BUG 8: Small touch target ────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 8 — Touch target too small (20×20px, needs 44×44px)</div><br>
+    <code class="selector-hint">selector: "#bug-small-touch" (check_accessibility)</code>
+    <div style="padding: 8px;">
+      <div id="bug-small-touch" title="This tiny dot is supposed to be a button"></div>
+    </div>
+    <p style="color:#888; font-size:13px; margin-top:8px;">That tiny blue dot is a "button". WCAG 2.5.5 requires 44×44px minimum.</p>
+  </div>
+
+  <!-- ── BUG 9: pointer-events:none ──────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 9 — pointer-events:none (unclickable button)</div><br>
+    <code class="selector-hint">selector: "#bug-pointer-none" (check_accessibility)</code>
+    <button id="bug-pointer-none">Click Me (I'm broken — pointer-events: none)</button>
+    <p style="color:#888; font-size:13px; margin-top:8px;">Looks like a button but pointer-events:none makes it completely unclickable.</p>
+  </div>
+
+  <!-- ── BUG 10: Fixed pixel width ─────────────────────────────────────────── -->
+  <div class="section" style="overflow: hidden;">
+    <div class="section-label">BUG 10 — Fixed 1200px width (breaks on mobile)</div><br>
+    <code class="selector-hint">selector: "#bug-fixed-width" (inspect_responsive)</code>
+    <div id="bug-fixed-width">
+      This element is hardcoded to <strong>width: 1200px</strong>. On most screens this overflows
+      the viewport and causes horizontal scroll. Use max-width instead.
+    </div>
+  </div>
+
+  <!-- ── BUG 11: Unresolved CSS variable ───────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 11 — Unresolved CSS variable (--missing-text-color)</div><br>
+    <code class="selector-hint">selector: "#bug-css-var" (diagnose_layout)</code>
+    <div id="bug-css-var">
+      This element uses <code>color: var(--missing-text-color)</code> which is never defined.
+      The text color falls back to browser default. Background uses a var with fallback so it's visible.
+    </div>
+  </div>
+
+  <!-- ── BUG 12: Flex container height:0 ───────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 12 — Flex container with height:0 (collapsed)</div><br>
+    <code class="selector-hint">selector: "#bug-flex-no-height" (debug_flexgrid)</code>
+    <div id="bug-flex-no-height">
+      <div class="flex-item">Item 1 — invisible because container height is 0</div>
+      <div class="flex-item">Item 2 — also invisible</div>
+    </div>
+    <p style="color:#888; font-size:13px; margin-top:8px;">⬆ Green container above is collapsed to zero height. Children invisible.</p>
+  </div>
+
+  <!-- ── BUG 13: Flex min-width overflow ───────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 13 — Flex children overflow (missing min-width:0)</div><br>
+    <code class="selector-hint">selector: "#bug-flex-overflow" (debug_flexgrid)</code>
+    <div id="bug-flex-overflow">
+      <div class="flex-item-overflow">This is a very long text that won't wrap and will overflow the flex container</div>
+      <div class="flex-item-overflow">Another long item that also won't shrink below its content size</div>
+    </div>
+    <p style="color:#888; font-size:13px; margin-top:8px;">Flex container is 300px but children overflow because min-width defaults to auto.</p>
+  </div>
+
+  <!-- ── BUG 14: Grid no template ──────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 14 — CSS Grid with no template (all stacked)</div><br>
+    <code class="selector-hint">selector: "#bug-grid-no-template" (debug_flexgrid)</code>
+    <div id="bug-grid-no-template">
+      <div class="grid-item">Grid Item 1</div>
+      <div class="grid-item">Grid Item 2</div>
+      <div class="grid-item">Grid Item 3</div>
+    </div>
+    <p style="color:#888; font-size:13px; margin-top:8px;">Developer forgot <code>grid-template-columns</code> — items stack vertically instead of forming a grid.</p>
+  </div>
+
+  <!-- ── BUG 15: Element off screen ────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 15 — Element positioned off-screen (left: 9999px)</div><br>
+    <code class="selector-hint">selector: "#bug-offscreen-right" (diagnose_layout)</code>
+    <div id="offscreen-wrapper">
+      <div id="bug-offscreen-right">I'm at left: 9999px — completely off screen!</div>
+    </div>
+    <p style="color:#888; font-size:13px; margin-top:8px;">Element is technically in the DOM but positioned way off screen.</p>
+  </div>
+
+  <!-- ── BUG 16: Magic z-index number ──────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-label">BUG 16 — Magic z-index number (z-index: 99999)</div><br>
+    <code class="selector-hint">selector: "#bug-magic-zindex" (inspect_stacking)</code>
+    <div id="bug-magic-zindex">
+      This element has <strong>z-index: 99999</strong> — a magic number that signals a developer
+      was fighting stacking context issues without understanding the root cause.
+    </div>
+  </div>
+
+  <!-- ── Summary / Cheat Sheet ─────────────────────────────────────────────── -->
+  <div class="section" style="background: #1e293b; color: #e2e8f0; border-color: #334155;">
+    <h2 style="color:#94a3b8;">🧪 Gravity Tool Cheat Sheet for This Page</h2>
+    <table style="width:100%; border-collapse:collapse; font-size:12px; font-family: monospace;">
+      <thead>
+        <tr style="color:#64748b; border-bottom:1px solid #334155;">
+          <th style="text-align:left; padding:6px 8px;">Tool</th>
+          <th style="text-align:left; padding:6px 8px;">Selector</th>
+          <th style="text-align:left; padding:6px 8px;">Detects</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">diagnose_layout</td><td style="padding:5px 8px; color:#34d399;">#bug-display-none</td><td style="padding:5px 8px; color:#94a3b8;">display:none</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">diagnose_layout</td><td style="padding:5px 8px; color:#34d399;">#bug-visibility-hidden</td><td style="padding:5px 8px; color:#94a3b8;">visibility:hidden</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">diagnose_layout</td><td style="padding:5px 8px; color:#34d399;">#bug-opacity-zero</td><td style="padding:5px 8px; color:#94a3b8;">opacity:0</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">diagnose_layout</td><td style="padding:5px 8px; color:#34d399;">#bug-overflow-hidden</td><td style="padding:5px 8px; color:#94a3b8;">overflow:hidden clipping</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">inspect_stacking</td><td style="padding:5px 8px; color:#34d399;">#bug-zindex-static</td><td style="padding:5px 8px; color:#94a3b8;">z-index on position:static</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">inspect_stacking</td><td style="padding:5px 8px; color:#34d399;">#bug-zindex-child</td><td style="padding:5px 8px; color:#94a3b8;">z-index trapped by parent transform</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">check_accessibility</td><td style="padding:5px 8px; color:#34d399;">#bug-contrast-fail</td><td style="padding:5px 8px; color:#94a3b8;">WCAG contrast fail (2.3:1)</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">check_accessibility</td><td style="padding:5px 8px; color:#34d399;">#bug-small-touch</td><td style="padding:5px 8px; color:#94a3b8;">Touch target 20×20px (needs 44×44)</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">check_accessibility</td><td style="padding:5px 8px; color:#34d399;">#bug-pointer-none</td><td style="padding:5px 8px; color:#94a3b8;">pointer-events:none on button</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">inspect_responsive</td><td style="padding:5px 8px; color:#34d399;">#bug-fixed-width</td><td style="padding:5px 8px; color:#94a3b8;">Fixed 1200px width</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">diagnose_layout</td><td style="padding:5px 8px; color:#34d399;">#bug-css-var</td><td style="padding:5px 8px; color:#94a3b8;">Unresolved --missing-text-color</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">debug_flexgrid</td><td style="padding:5px 8px; color:#34d399;">#bug-flex-no-height</td><td style="padding:5px 8px; color:#94a3b8;">Flex container height:0</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">debug_flexgrid</td><td style="padding:5px 8px; color:#34d399;">#bug-flex-overflow</td><td style="padding:5px 8px; color:#94a3b8;">Flex min-width overflow</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">debug_flexgrid</td><td style="padding:5px 8px; color:#34d399;">#bug-grid-no-template</td><td style="padding:5px 8px; color:#94a3b8;">Grid with no template-columns</td></tr>
+        <tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px; color:#f472b6;">diagnose_layout</td><td style="padding:5px 8px; color:#34d399;">#bug-offscreen-right</td><td style="padding:5px 8px; color:#94a3b8;">Positioned at left:9999px</td></tr>
+        <tr>                                             <td style="padding:5px 8px; color:#f472b6;">inspect_stacking</td><td style="padding:5px 8px; color:#34d399;">#bug-magic-zindex</td><td style="padding:5px 8px; color:#94a3b8;">Magic z-index: 99999</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</body>
+</html>

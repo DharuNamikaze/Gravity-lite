@@ -1,0 +1,25 @@
+# Source — not needed in the published package (dist/ is what ships)
+src/
+test/
+
+# TypeScript project files
+tsconfig.json
+*.tsbuildinfo
+
+# Dev / repo artifacts
+.git/
+.gitignore
+.vscode/
+.kiro/
+*.md
+!README.md
+
+# Node tooling
+node_modules/
+
+# Sourcemaps (keep .d.ts for types, skip maps to reduce size)
+dist/*.js.map
+
+# Misc
+*.log
+*.rar

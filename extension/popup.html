@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 280px;
+      padding: 16px;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      color: #1a1a1a;
+      background: #fff;
+    }
+    h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.green  { background: #22c55e; }
+    .dot.red    { background: #ef4444; }
+    .dot.yellow { background: #eab308; }
+
+    .label { color: #555; min-width: 80px; }
+    .value { font-weight: 500; }
+
+    hr { border: none; border-top: 1px solid #eee; margin: 12px 0; }
+
+    button {
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #toggleBtn {
+      background: #2563eb;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    #toggleBtn:hover { background: #1d4ed8; }
+    #toggleBtn.disconnect { background: #dc2626; }
+    #toggleBtn.disconnect:hover { background: #b91c1c; }
+
+    .hint {
+      font-size: 11px;
+      color: #888;
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+    .hint code {
+      background: #f3f4f6;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+    .error-msg {
+      font-size: 11px;
+      color: #dc2626;
+      margin-top: 4px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h3>⚡ Gravity</h3>
+
+  <div class="row">
+    <span class="label">Debugger</span>
+    <div id="debugDot" class="dot red"></div>
+    <span id="debugText" class="value">Disconnected</span>
+  </div>
+  <div class="row">
+    <span class="label">MCP Server</span>
+    <div id="mcpDot" class="dot red"></div>
+    <span id="mcpText" class="value">Not running</span>
+  </div>
+
+  <div id="errorMsg" class="error-msg"></div>
+
+  <hr>
+
+  <button id="toggleBtn">Connect to Tab</button>
+
+  <div class="hint">
+    <strong>Setup (once):</strong><br>
+    1. Add <code>gravity</code> to your MCP config<br>
+    2. Click "Connect to Tab" above<br>
+    3. Ask AI: <em>"diagnose #header"</em>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

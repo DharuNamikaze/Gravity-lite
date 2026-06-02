@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Gravity",
+  "version": "3.0.0",
+  "description": "AI-powered CSS layout diagnostics — connects to local MCP server",
+  "permissions": [
+    "debugger",
+    "activeTab",
+    "tabs",
+    "offscreen"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.svg",
+      "48": "icon48.svg",
+      "128": "icon128.svg"
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "name": "gravity-lite",
+  "version": "3.0.0",
+  "description": "AI-powered CSS layout diagnostics — zero-config MCP server for developers",
+  "type": "module",
+  "bin": {
+    "gravity": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "commander": "^11.0.0",
+    "ws": "^8.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "dist",
+    "extension",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "css",
+    "layout",
+    "diagnostics",
+    "devtools",
+    "chrome",
+    "ai",
+    "kiro",
+    "cursor",
+    "claude",
+    "accessibility",
+    "wcag"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DharuNamikaze/gravity"
+  },
+  "homepage": "https://github.com/DharuNamikaze/gravity#readme",
+  "bugs": {
+    "url": "https://github.com/DharuNamikaze/gravity/issues"
+  },
+  "author": "DharuNamikaze"
+}
