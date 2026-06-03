@@ -5,6 +5,8 @@ const mcpDot    = document.getElementById('mcpDot');
 const mcpText   = document.getElementById('mcpText');
 const toggleBtn = document.getElementById('toggleBtn');
 const errorMsg  = document.getElementById('errorMsg');
+const portInput = document.getElementById('portInput');
+const portBtn   = document.getElementById('portBtn');
 
 function setDot(dot, text, state, label) {
   dot.className = 'dot ' + state;
@@ -34,6 +36,11 @@ function render(status) {
     setDot(mcpDot, mcpText, 'green', 'Connected');
   } else {
     setDot(mcpDot, mcpText, 'red', 'Not running');
+  }
+
+  // Port input — show current port, but only if the user isn't actively editing
+  if (status.port && document.activeElement !== portInput) {
+    portInput.value = status.port;
   }
 
   // Button
@@ -78,6 +85,33 @@ toggleBtn.addEventListener('click', () => {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'ws_status_update') refresh();
   if (msg.action === 'debugger_detached') refresh();
+});
+
+// Port change
+portBtn.addEventListener('click', () => {
+  const val = portInput.value.trim();
+  const p = parseInt(val, 10);
+  if (!val || !Number.isFinite(p) || p < 1024 || p > 65535) {
+    showError('Port must be 1024–65535');
+    return;
+  }
+  portBtn.disabled = true;
+  portBtn.textContent = '…';
+  chrome.runtime.sendMessage({ action: 'setPort', port: p }, (res) => {
+    portBtn.disabled = false;
+    portBtn.textContent = 'Set';
+    if (res && !res.success) {
+      showError(res.error || 'Failed to set port');
+    } else {
+      showError(null);
+      refresh();
+    }
+  });
+});
+
+// Also allow pressing Enter in the port field
+portInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') portBtn.click();
 });
 
 refresh();

@@ -8,7 +8,17 @@
 //
 // The offscreen document owns the persistent WebSocket to the MCP server.
 // The SW wakes on demand to execute CDP commands via chrome.debugger.
+//
+// Port resolution order:
+//   1. chrome.storage.local key "gravityPort"  (set via popup or directly)
+//   2. Hard-coded default 9224
+//
+// The port is passed to the offscreen doc as a URL search param so the doc
+// does not need storage access of its own:
+//   offscreen.html?port=9224
 // =============================================================================
+
+const DEFAULT_PORT = 9224;
 
 let debuggerState = {
   attached: false,
@@ -20,19 +30,47 @@ let debuggerState = {
 
 let wsConnected = false; // reflects offscreen WS status
 
+// ── Port helpers ──────────────────────────────────────────────────────────────
+
+async function getPort() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['gravityPort'], (result) => {
+      const p = parseInt(result.gravityPort, 10);
+      resolve(Number.isFinite(p) && p > 0 && p < 65536 ? p : DEFAULT_PORT);
+    });
+  });
+}
+
 // ── Offscreen document management ────────────────────────────────────────────
 
 async function ensureOffscreen() {
   // chrome.offscreen available since Chrome 116
   const existing = await chrome.offscreen.hasDocument().catch(() => false);
-  if (!existing) {
-    await chrome.offscreen.createDocument({
-      url: 'offscreen.html',
-      reasons: ['WORKERS'],
-      justification: 'Maintain persistent WebSocket connection to local MCP server bridge',
-    }).catch(() => {
-      // May fail if already being created — ignore
-    });
+  if (existing) return;
+
+  const port = await getPort();
+
+  await chrome.offscreen.createDocument({
+    url: `offscreen.html?port=${port}`,
+    reasons: ['WORKERS'],
+    justification: 'Maintain persistent WebSocket connection to local MCP server bridge',
+  }).catch(() => {
+    // May fail if already being created concurrently — ignore
+  });
+}
+
+// Close the offscreen doc so it will be recreated with the new port next time.
+async function restartOffscreen() {
+  const existing = await chrome.offscreen.hasDocument().catch(() => false);
+  if (existing) {
+    // There is no chrome.offscreen.closeDocument, but closing the WS inside
+    // the doc causes it to reconnect with whatever port it was started with.
+    // The only reliable way to change the port is to force a reload of the doc.
+    // We achieve this by sending a 'reconfigure' message with the new port.
+    const port = await getPort();
+    chrome.runtime.sendMessage({ to: 'offscreen', type: 'reconfigure', port }).catch(() => {});
+  } else {
+    await ensureOffscreen();
   }
 }
 
@@ -90,8 +128,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.action === 'status') {
-    sendResponse({ ...debuggerState, wsConnected });
-    return true;
+    getPort().then((port) => {
+      sendResponse({ ...debuggerState, wsConnected, port });
+    });
+    return true; // async
+  }
+
+  // Set port from popup — persist and restart offscreen with new port
+  if (msg.action === 'setPort') {
+    const p = parseInt(msg.port, 10);
+    if (!Number.isFinite(p) || p <= 0 || p >= 65536) {
+      return sendResponse({ success: false, error: 'Invalid port number' });
+    }
+    chrome.storage.local.set({ gravityPort: p }, async () => {
+      wsConnected = false;
+      await restartOffscreen();
+      sendResponse({ success: true, port: p });
+    });
+    return true; // async
   }
 });
 

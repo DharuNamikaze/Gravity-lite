@@ -12,6 +12,7 @@
  *   8. highlight_element      — visual overlay in browser
  *   9. screenshot_element     — capture element as PNG
  *  10. get_page_performance   — layout paint metrics from Chrome
+ *  11. capture_viewport       — full visible page screenshot (vision input)
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -128,6 +129,24 @@ const TOOLS = [
     name: 'get_page_performance',
     description: 'Get page-level layout and performance metrics: viewport dimensions, scroll position, total page size, layout paint timings, and a count of elements that may be causing layout thrashing.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'capture_viewport',
+    description: 'Capture a screenshot of the full visible viewport — what the user actually sees right now. Returns a base64-encoded PNG. Complements computed-value tools: screenshots show what it looks like, computed values explain why. Note: image rendering as a vision input depends on your MCP client (Claude Desktop supports it; some IDEs return it as a base64 string).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        format: {
+          type: 'string',
+          enum: ['png', 'jpeg'],
+          description: "Image format: 'png' (lossless, default) or 'jpeg' (smaller file size)",
+        },
+        quality: {
+          type: 'number',
+          description: 'JPEG quality 0–100 (only applies when format is jpeg, default: 80)',
+        },
+      },
+    },
   },
 ];
 
@@ -521,6 +540,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       });
     }
 
+    // ── capture_viewport ──────────────────────────────────────────────────────
+    if (name === 'capture_viewport') {
+      const format  = (args?.format as 'png' | 'jpeg') ?? 'png';
+      const quality = (args?.quality as number) ?? 80;
+
+      const { layoutViewport } = await cdp('Page.getLayoutMetrics') as any;
+      const { data } = await cdp('Page.captureScreenshot', {
+        format,
+        ...(format === 'jpeg' ? { quality } : {}),
+        clip: {
+          x:      0,
+          y:      0,
+          width:  layoutViewport.clientWidth,
+          height: layoutViewport.clientHeight,
+          scale:  1,
+        },
+        captureBeyondViewport: false,
+      }) as any;
+
+      return {
+        content: [
+          {
+            type: 'image' as const,
+            data,
+            mimeType: format === 'jpeg' ? 'image/jpeg' : 'image/png',
+          },
+          {
+            type: 'text' as const,
+            text: JSON.stringify({
+              viewport: {
+                width:  layoutViewport.clientWidth,
+                height: layoutViewport.clientHeight,
+              },
+              format,
+              note: 'This is the full visible viewport. Use screenshot_element to capture a specific element.',
+            }, null, 2),
+          },
+        ],
+      };
+    }
+
     throw new Error(`Unknown tool: ${name}`);
 
   } catch (error: unknown) {
@@ -564,7 +624,7 @@ export class GravityMCPServer {
     await startBridge();
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error('[gravity] MCP server ready — 10 tools loaded');
+    console.error('[gravity] MCP server ready — 11 tools loaded');
     process.on('SIGINT',  () => process.exit(0));
     process.on('SIGTERM', () => process.exit(0));
   }

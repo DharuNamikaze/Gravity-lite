@@ -53,6 +53,34 @@
     #toggleBtn.disconnect { background: #dc2626; }
     #toggleBtn.disconnect:hover { background: #b91c1c; }
 
+    .port-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+    }
+    .port-row label {
+      color: #555;
+      min-width: 60px;
+      font-size: 12px;
+    }
+    .port-row input {
+      width: 70px;
+      padding: 4px 6px;
+      border: 1px solid #d1d5db;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .port-row button {
+      width: auto;
+      padding: 4px 10px;
+      font-size: 12px;
+      background: #6b7280;
+      color: #fff;
+      margin: 0;
+    }
+    .port-row button:hover { background: #4b5563; }
+
     .hint {
       font-size: 11px;
       color: #888;
@@ -92,6 +120,12 @@
   <hr>
 
   <button id="toggleBtn">Connect to Tab</button>
+
+  <div class="port-row">
+    <label for="portInput">MCP port</label>
+    <input id="portInput" type="number" min="1024" max="65535" placeholder="9224">
+    <button id="portBtn">Set</button>
+  </div>
 
   <div class="hint">
     <strong>Setup (once):</strong><br>
