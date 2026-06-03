@@ -1,6 +1,6 @@
 {
   "name": "gravity-lite",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "AI-powered CSS layout diagnostics — zero-config MCP server for developers",
   "type": "module",
   "bin": {
@@ -49,11 +49,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/DharuNamikaze/gravity"
+    "url": "https://github.com/DharuNamikaze/gravity-lite"
   },
-  "homepage": "https://github.com/DharuNamikaze/gravity#readme",
+  "homepage": "https://github.com/DharuNamikaze/gravity-lite#readme",
   "bugs": {
-    "url": "https://github.com/DharuNamikaze/gravity/issues"
+    "url": "https://github.com/DharuNamikaze/gravity-lite/issues"
   },
   "author": "DharuNamikaze"
 }
