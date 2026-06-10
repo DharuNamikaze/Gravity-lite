@@ -7,50 +7,77 @@ AI-powered CSS layout diagnostics. Zero-config MCP server for AI assistants.
 
 Give your AI assistant (Kiro, Cursor, Claude, etc.) the ability to **see what actually renders** in your browser — not just read source code. Gravity bridges AI tools to live Chrome tabs via the Chrome DevTools Protocol.
 
-## Install
+**Requirements:** Node.js ≥ 16, Chrome ≥ 116
+
+---
+
+## Installation
+
+### Step 1 — Install the package
 
 ```bash
 npm install -g gravity-lite
 ```
 
-**Requirements:** Node.js ≥ 16, Chrome ≥ 116
+### Step 2 — Add to your IDE MCP config
 
----
+Pick your IDE and add the `gravity` server. Then **restart your IDE**.
 
-## Setup (one-time, ~2 minutes)
+**Kiro** — `.kiro/settings/mcp.json`
 
-### 1. Add to your IDE MCP config
+**Cursor** — `~/.cursor/mcp.json`
 
-**Kiro** (`.kiro/settings/mcp.json`), **Cursor** (`~/.cursor/mcp.json`), or **Claude Desktop** (`claude_desktop_config.json`):
+**Claude Desktop** — `claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
-    "gravity": { "command": "gravity" }
+    "gravity": {
+      "command": "gravity"
+    }
   }
 }
 ```
 
-Restart your IDE. The MCP server starts automatically.
+### Step 3 — Load the Chrome extension
 
-### 2. Load the Chrome extension
-
-```
-chrome://extensions  →  enable Developer Mode  →  Load unpacked
-```
-
-Point it at the `extension/` folder inside the package:
+Run this to get the exact folder path:
 
 ```bash
-# Print the exact path to load
 gravity doctor
 ```
 
-### 3. Connect to a tab
+Then in Chrome:
 
-Click the **Gravity** icon in Chrome → **Connect to Tab**.
+1. Go to `chrome://extensions`
+2. Enable **Developer mode** (top right toggle)
+3. Click **Load unpacked**
+4. Select the `extension/` folder printed by `gravity doctor`
 
-Done. The extension connects to the MCP server automatically.
+### Step 4 — Connect to a tab
+
+1. Open the page you want to debug in Chrome
+2. Click the **⚡ Gravity** icon in the Chrome toolbar
+3. Click **Connect to Tab**
+
+The popup shows two status dots — both should go green once connected.
+
+That's it. Ask your AI to diagnose anything.
+
+---
+
+## Usage
+
+```
+diagnose the #header element
+why is .modal behind everything
+check accessibility of the .submit-btn
+screenshot the #hero section
+highlight .nav-bar for 5 seconds
+debug the flex container .card-grid
+```
+
+The difference: when the AI answers, it's reading from the **live browser**. Every number it gives you came from a real CDP call. It's not guessing.
 
 ---
 
@@ -68,17 +95,7 @@ Done. The extension connects to the MCP server automatically.
 | `highlight_element` | Color-coded overlay in the browser (content/padding/border/margin) |
 | `screenshot_element` | Capture any element as a base64 PNG |
 | `get_page_performance` | Layout thrash metrics, paint timings |
-
-### Example prompts
-
-```
-diagnose the #header element
-why is .modal behind everything — inspect stacking context
-check accessibility of the .submit-btn
-screenshot the #hero section
-highlight .nav-bar for 5 seconds
-debug the flex container .card-grid
-```
+| `capture_viewport` | Screenshot the full visible viewport |
 
 ---
 
@@ -96,15 +113,15 @@ IDE / AI  ──stdio──►  MCP Server (Node.js)
                        Active Tab (CDP)
 ```
 
-**The key insight:** The extension connects *out* to the MCP server, not the other way around. No native messaging, no registry keys, no OS-specific setup. Works on Linux, macOS, and Windows.
+The extension connects *out* to the MCP server — not the other way around. No native messaging, no registry keys, no OS-specific setup. Works on Linux, macOS, and Windows.
 
 ---
 
 ## Commands
 
 ```bash
-gravity           # start MCP server (called by IDE automatically)
-gravity doctor    # check setup status and print extension path
+gravity           # start MCP server (your IDE calls this automatically)
+gravity doctor    # check setup and print the extension folder path
 ```
 
 ## Environment variables
@@ -121,6 +138,18 @@ gravity doctor    # check setup status and print extension path
 |---|---|
 | "Browser extension not connected" | Open Chrome, load the extension, click "Connect to Tab" |
 | "Port 9224 already in use" | Set `GRAVITY_PORT=9225` in your MCP config |
-| MCP server dot stays red in popup | Make sure `gravity` is running (check IDE MCP status) |
+| MCP server dot stays red in popup | Make sure `gravity` is running — check IDE MCP status panel |
 | "Element not found: #selector" | Verify the selector exists on the current page |
-| Chrome ≥ 116 required | The offscreen documents API was added in Chrome 116 |
+| Chrome version error | The offscreen API requires Chrome 116 or later |
+
+---
+
+## Contributing
+
+Contributions are welcome — bug reports, docs fixes, and new MCP tools alike. The project is MIT licensed, so anything you contribute ships under the same terms.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, branch naming, commit message format, and the PR checklist.
+
+---
+
+[npm](https://www.npmjs.com/package/gravity-lite) · [GitHub](https://github.com/DharuNamikaze/gravity-lite)
