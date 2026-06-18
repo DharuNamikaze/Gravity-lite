@@ -18,33 +18,44 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { createRequire } from 'module';
 
 import { startBridge, sendCDP, isExtensionConnected, getBridgePort } from './bridge.js';
 import {
-  validateSelector, extractBounds, sortBySeverity,
+  validateSelector, extractBounds, extractPadding, sortBySeverity,
   checkVisibility, checkOffscreen, checkOverflow,
   checkZIndex, checkStackingContextCreators,
   checkFlexGrid, checkResponsive,
-  checkAccessibilityStyles, checkColorContrast, checkCustomProperties,
+  checkAccessibilityStyles, checkColorContrast, checkAuthoredVars,
+  parseColor, contrastRatio, isTransparent,
 } from './diagnostics.js';
 
+const require = createRequire(import.meta.url);
+const pkg = require('../package.json') as { version: string };
+
 // ── Tool definitions ──────────────────────────────────────────────────────────
+
+// A strict object schema (no extra properties allowed) with one optional
+// `selector` / extra params. Centralised so every selector tool validates the
+// same way and rejects typo'd parameters.
+const baseProps = {
+  selector: { type: 'string', description: "CSS selector, e.g. '#modal', '.nav-bar', 'button.primary'" },
+};
 
 const TOOLS = [
   {
     name: 'connect_browser',
     description: 'Check whether the Gravity Chrome extension is connected and ready. Call this first to verify setup.',
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     name: 'diagnose_layout',
-    description: 'Full layout diagnosis for an element: detects overflow, offscreen positioning, hidden visibility, unresolved CSS variables, and responsive sizing issues. Best first tool to run on any broken element.',
+    description: 'Full layout diagnosis for an element: detects overflow, offscreen positioning, hidden visibility, unresolved CSS variables, and responsive sizing issues. Best first tool to run on any broken element. Note: only the FIRST element matching the selector is analysed — use a more specific selector to target a particular element.',
     inputSchema: {
       type: 'object',
-      properties: {
-        selector: { type: 'string', description: "CSS selector, e.g. '#modal', '.nav-bar', 'button.primary'" },
-      },
+      properties: baseProps,
       required: ['selector'],
+      additionalProperties: false,
     },
   },
   {
@@ -52,21 +63,19 @@ const TOOLS = [
     description: "Diagnose z-index and stacking context problems — the #1 CSS pain point. Reveals why 'z-index: 9999' still goes behind other elements, identifies which CSS properties trap elements in stacking contexts (transform, opacity, filter, etc.), and shows the full stacking context chain.",
     inputSchema: {
       type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector of the element with layering issues' },
-      },
+      properties: baseProps,
       required: ['selector'],
+      additionalProperties: false,
     },
   },
   {
     name: 'check_accessibility',
-    description: 'Audit an element for accessibility issues: WCAG color contrast ratio (AA & AAA), touch target size (44×44px minimum), pointer-events blocking interaction, missing cursor feedback, and ARIA role from the accessibility tree.',
+    description: 'Audit an element for accessibility issues: WCAG color contrast ratio (AA & AAA), touch target size (44×44px minimum, border-box), pointer-events blocking interaction, missing cursor feedback on interactive tags, and ARIA role from the accessibility tree.',
     inputSchema: {
       type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector' },
-      },
+      properties: baseProps,
       required: ['selector'],
+      additionalProperties: false,
     },
   },
   {
@@ -74,10 +83,9 @@ const TOOLS = [
     description: 'Analyze how an element behaves across screen sizes: detects fixed pixel widths that will break on mobile, elements wider than the viewport, and missing responsive patterns. Also reports current viewport size.',
     inputSchema: {
       type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector' },
-      },
+      properties: baseProps,
       required: ['selector'],
+      additionalProperties: false,
     },
   },
   {
@@ -85,10 +93,9 @@ const TOOLS = [
     description: 'Deep inspection of flexbox and CSS Grid containers: shows all layout properties, analyzes each child element for overflow/shrink issues, detects collapsed containers, and flags common flex/grid pitfalls.',
     inputSchema: {
       type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector of the flex or grid container' },
-      },
+      properties: baseProps,
       required: ['selector'],
+      additionalProperties: false,
     },
   },
   {
@@ -96,10 +103,9 @@ const TOOLS = [
     description: 'Get a complete snapshot of computed CSS properties for an element: box model, all layout-related styles, custom property values, and applied CSS rules with specificity.',
     inputSchema: {
       type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector' },
-      },
+      properties: baseProps,
       required: ['selector'],
+      additionalProperties: false,
     },
   },
   {
@@ -108,27 +114,27 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        selector: { type: 'string', description: 'CSS selector' },
+        ...baseProps,
         duration: { type: 'number', description: 'Highlight duration in ms (default: 3000, 0 = permanent until next call)' },
       },
       required: ['selector'],
+      additionalProperties: false,
     },
   },
   {
     name: 'screenshot_element',
-    description: 'Capture a screenshot of a specific element. Returns a base64-encoded PNG. Use to visually document bugs or verify fixes.',
+    description: 'Capture a screenshot of a specific element. Returns a base64-encoded PNG. Use to visually document bugs or verify fixes. Uses device pixel ratio for crisp output on retina displays.',
     inputSchema: {
       type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS selector' },
-      },
+      properties: baseProps,
       required: ['selector'],
+      additionalProperties: false,
     },
   },
   {
     name: 'get_page_performance',
     description: 'Get page-level layout and performance metrics: viewport dimensions, scroll position, total page size, layout paint timings, and a count of elements that may be causing layout thrashing.',
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     name: 'capture_viewport',
@@ -146,6 +152,7 @@ const TOOLS = [
           description: 'JPEG quality 0–100 (only applies when format is jpeg, default: 80)',
         },
       },
+      additionalProperties: false,
     },
   },
 ];
@@ -153,7 +160,7 @@ const TOOLS = [
 // ── MCP server ────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'gravity', version: '3.0.0' },
+  { name: 'gravity', version: pkg.version },
   { capabilities: { tools: {} } }
 );
 
@@ -178,13 +185,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── shared helpers ────────────────────────────────────────────────────────
 
-    async function resolveNode(selector: string) {
+    /**
+     * Resolve a selector to a CDP nodeId. Uses a SHALLOW document (depth: 1)
+     * instead of requesting the entire DOM tree on every call — querySelector
+     * resolves the rest. Also returns how many elements match the selector so
+     * callers can warn that only the first is analysed.
+     */
+    async function resolveNode(selector: string): Promise<{ nodeId: number; matchCount: number; tagName: string }> {
       const v = validateSelector(selector);
       if (!v.valid) throw new Error(`Invalid selector: ${v.error}`);
-      const { root } = await cdp('DOM.getDocument', { depth: -1 }) as any;
+      // Shallow document — querySelector resolves the rest, no need to pull
+      // the whole tree (which can be huge on real apps).
+      const { root } = await cdp('DOM.getDocument', { depth: 1 }) as any;
       const { nodeId } = await cdp('DOM.querySelector', { nodeId: root.nodeId, selector }) as any;
       if (!nodeId) throw new Error(`Element not found: ${selector}`);
-      return nodeId as number;
+      // How many match? Cheap and useful for warning the AI.
+      let matchCount = 1;
+      try {
+        const r = await cdp('Runtime.evaluate', {
+          expression: `document.querySelectorAll(${JSON.stringify(selector)}).length`,
+          returnByValue: true,
+        }) as any;
+        matchCount = r?.result?.value ?? 1;
+      } catch { /* best-effort */ }
+
+      let tagName = '';
+      try {
+        const { node } = await cdp('DOM.describeNode', { nodeId, depth: 0 }) as any;
+        tagName = node?.localName ?? '';
+      } catch { /* best-effort */ }
+
+      return { nodeId, matchCount, tagName };
     }
 
     async function getStyles(nodeId: number) {
@@ -197,28 +228,56 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const selector = args?.selector as string;
       if (!selector) throw new Error('selector is required');
 
-      const nodeId = await resolveNode(selector);
+      const { nodeId, matchCount } = await resolveNode(selector);
       const { model }              = await cdp('DOM.getBoxModel', { nodeId }) as any;
       const { layoutViewport: vp } = await cdp('Page.getLayoutMetrics') as any;
       const styles                 = await getStyles(nodeId);
       const bounds                 = extractBounds(model);
 
+      // Authored-rule inspection for unresolved CSS variables
+      let varIssues = [] as ReturnType<typeof checkAuthoredVars>;
+      try {
+        const { matchedCSSRules } = await cdp('CSS.getMatchedStylesForNode', { nodeId }) as any;
+        const declarations: { property: string; value: string }[] = [];
+        for (const r of matchedCSSRules ?? []) {
+          const style = r?.rule?.style;
+          if (!style?.cssProperties) continue;
+          for (const p of style.cssProperties) {
+            if (p.name && p.value) declarations.push({ property: p.name, value: p.value });
+          }
+        }
+        // Inline style too
+        try {
+          const { inlineStyle } = await cdp('CSS.getMatchedStylesForNode', { nodeId }) as any;
+          if (inlineStyle?.cssProperties) {
+            for (const p of inlineStyle.cssProperties) {
+              if (p.name && p.value) declarations.push({ property: p.name, value: p.value });
+            }
+          }
+        } catch { /* best-effort */ }
+        varIssues = checkAuthoredVars(declarations, styles);
+      } catch {
+        // authored-style inspection is best-effort
+      }
+
       const issues = sortBySeverity([
         ...checkVisibility(styles),
         ...checkOffscreen(bounds, vp),
         ...checkOverflow(styles),
-        ...checkCustomProperties(styles),
+        ...varIssues,
         ...checkResponsive(styles, bounds, vp),
       ]);
 
       return ok({
         element: selector,
+        matchCount,
         timestamp: new Date().toISOString(),
         position: bounds,
         viewport: { width: vp.clientWidth, height: vp.clientHeight },
         computedStyles: pick(styles, ['display','position','width','height','overflow','z-index','visibility','opacity','max-width','min-height']),
         issues: issues.length ? issues : [{ type: 'none', severity: 'low', message: 'No layout issues detected', suggestion: 'Element appears correctly positioned' }],
         summary: summarize(issues),
+        ...(matchCount > 1 ? { note: `${matchCount} elements match "${selector}" — only the first was analysed.` } : {}),
       });
     }
 
@@ -227,19 +286,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const selector = args?.selector as string;
       if (!selector) throw new Error('selector is required');
 
-      const nodeId = await resolveNode(selector);
+      const { nodeId, matchCount } = await resolveNode(selector);
       const styles  = await getStyles(nodeId);
 
       const zIssues = checkZIndex(styles);
       const { creates, reasons } = checkStackingContextCreators(styles);
 
-      // Walk up ancestors to find stacking context creators
+      // Walk up ancestors to find stacking context creators — NO artificial
+      // depth cap (a real UI may nest the trapping ancestor deep).
       const ancestors: { tag: string; creates: boolean; reasons: string[] }[] = [];
       try {
         const { node } = await cdp('DOM.describeNode', { nodeId, depth: 0 }) as any;
         let parentId = node.parentId;
-        let depth = 0;
-        while (parentId && depth < 10) {
+        const guard = 1000; // pure runaway-loop protection, not a real limit
+        let steps = 0;
+        while (parentId && steps < guard) {
           const { node: parent } = await cdp('DOM.describeNode', { nodeId: parentId, depth: 0 }) as any;
           if (!parent || parent.nodeType !== 1) break; // element nodes only
           const { computedStyle: ps } = await cdp('CSS.getComputedStyleForNode', { nodeId: parentId }) as any;
@@ -249,7 +310,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ancestors.push({ tag: parent.localName, creates: true, reasons: sc.reasons });
           }
           parentId = parent.parentId;
-          depth++;
+          steps++;
         }
       } catch {
         // Ancestor walk is best-effort
@@ -257,6 +318,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       return ok({
         element: selector,
+        matchCount,
         zIndex: styles.get('z-index') ?? 'auto',
         position: styles.get('position') ?? 'static',
         createsStackingContext: creates,
@@ -267,6 +329,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ? `This element is nested inside ${ancestors.length} stacking context(s). Even with a high z-index, it cannot appear above elements outside these contexts.`
           : 'No ancestor stacking contexts found. z-index should work normally relative to siblings.',
         tip: 'The most common cause of z-index not working: a parent has transform, opacity < 1, or filter applied — these create isolated stacking contexts.',
+        ...(matchCount > 1 ? { note: `${matchCount} elements match "${selector}" — only the first was analysed.` } : {}),
       });
     }
 
@@ -275,16 +338,56 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const selector = args?.selector as string;
       if (!selector) throw new Error('selector is required');
 
-      const nodeId = await resolveNode(selector);
+      const { nodeId, matchCount, tagName } = await resolveNode(selector);
       const styles  = await getStyles(nodeId);
       const { model } = await cdp('DOM.getBoxModel', { nodeId }) as any;
       const bounds = extractBounds(model);
 
+      // Walk ancestors to find the effective (opaque) background colour,
+      // because contrast must be measured against what's actually behind the
+      // text — which may be a parent's background when this element's own
+      // background-color is transparent.
+      let effectiveBg = styles.get('background-color');
+      if (isTransparent(effectiveBg)) {
+        try {
+          const { node } = await cdp('DOM.describeNode', { nodeId, depth: 0 }) as any;
+          let parentId = node.parentId;
+          const guard = 1000;
+          let steps = 0;
+          while (parentId && steps < guard) {
+            const { node: parent } = await cdp('DOM.describeNode', { nodeId: parentId, depth: 0 }) as any;
+            if (!parent || parent.nodeType !== 1) break;
+            const { computedStyle: ps } = await cdp('CSS.getComputedStyleForNode', { nodeId: parentId }) as any;
+            const pMap = new Map<string, string>((ps as any[]).map(p => [p.name, p.value]));
+            const candidateBg = pMap.get('background-color');
+            if (candidateBg && !isTransparent(candidateBg)) {
+              effectiveBg = candidateBg;
+              break;
+            }
+            parentId = parent.parentId;
+            steps++;
+          }
+        } catch { /* best-effort */ }
+      }
+
+      // Build a synthetic styles map so the contrast check uses the resolved
+      // effective background instead of a transparent one.
+      const contrastStyles = new Map(styles);
+      if (effectiveBg && effectiveBg !== styles.get('background-color')) {
+        contrastStyles.set('background-color', effectiveBg);
+      }
+
       const styleIssues = [
-        ...checkAccessibilityStyles(styles),
-        ...checkColorContrast(styles),
-        ...checkResponsive(styles, bounds, { clientWidth: 375 }), // check against mobile viewport
-      ].filter(i => i.type === 'small-touch-target' || i.type.startsWith('contrast') || i.type.startsWith('pointer') || i.type.startsWith('user-select') || i.type.startsWith('missing'));
+        ...checkAccessibilityStyles(styles, tagName),
+        ...checkColorContrast(contrastStyles),
+        ...checkResponsive(styles, bounds, { clientWidth: 0 }), // real viewport; only touch-target check survives (see below)
+      ].filter(i =>
+        i.type === 'small-touch-target' ||
+        i.type.startsWith('contrast') ||
+        i.type.startsWith('pointer') ||
+        i.type.startsWith('user-select') ||
+        i.type.startsWith('missing')
+      );
 
       // Get ARIA info from accessibility tree
       let ariaInfo: Record<string, unknown> = {};
@@ -306,24 +409,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ariaInfo = { note: 'Accessibility tree not available for this element' };
       }
 
-      // Color contrast detail
+      // Color contrast detail — with the resolved effective background
       const fg = styles.get('color');
-      const bg = styles.get('background-color');
+      const bg = effectiveBg;
       const fontSize = parseFloat(styles.get('font-size') ?? '16');
+      let ratio: number | null = null;
+      const fgRgb = fg ? parseColor(fg) : null;
+      const bgRgb = bg ? parseColor(bg) : null;
+      if (fgRgb && bgRgb) ratio = Math.round(contrastRatio(fgRgb, bgRgb) * 100) / 100;
 
       return ok({
         element: selector,
+        matchCount,
         size: { width: bounds.width, height: bounds.height },
         touchTargetOk: bounds.width >= 44 && bounds.height >= 44,
         colorContrast: fg && bg ? {
           foreground: fg,
           background: bg,
           fontSize: `${fontSize}px`,
+          ...(ratio !== null ? { ratio: `${ratio}:1` } : {}),
+          ...(effectiveBg !== styles.get('background-color')
+            ? { note: `Background was transparent on this element; measured against ancestor ${effectiveBg}.` }
+            : {}),
         } : null,
         ariaInfo,
         issues: sortBySeverity(styleIssues),
         summary: summarize(styleIssues),
         wcagReference: 'https://www.w3.org/WAI/WCAG21/quickref/',
+        ...(matchCount > 1 ? { note: `${matchCount} elements match "${selector}" — only the first was analysed.` } : {}),
       });
     }
 
@@ -332,7 +445,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const selector = args?.selector as string;
       if (!selector) throw new Error('selector is required');
 
-      const nodeId = await resolveNode(selector);
+      const { nodeId, matchCount } = await resolveNode(selector);
       const styles  = await getStyles(nodeId);
       const { model }              = await cdp('DOM.getBoxModel', { nodeId }) as any;
       const { layoutViewport: vp } = await cdp('Page.getLayoutMetrics') as any;
@@ -344,6 +457,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       return ok({
         element: selector,
+        matchCount,
         viewport: { width: vp.clientWidth, height: vp.clientHeight },
         elementSize: { width: bounds.width, height: bounds.height },
         widthVsViewport: `${widthPercent}%`,
@@ -353,6 +467,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         mediaQueriesNote: 'Gravity reads computed styles — media queries are already applied for the current viewport size',
         issues: issues.length ? issues : [{ type: 'none', severity: 'low', message: 'No responsive issues detected at current viewport size', suggestion: 'Resize the browser window and run again to test other breakpoints' }],
         summary: summarize(issues),
+        ...(matchCount > 1 ? { note: `${matchCount} elements match "${selector}" — only the first was analysed.` } : {}),
       });
     }
 
@@ -361,7 +476,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const selector = args?.selector as string;
       if (!selector) throw new Error('selector is required');
 
-      const nodeId = await resolveNode(selector);
+      const { nodeId, matchCount } = await resolveNode(selector);
       const styles  = await getStyles(nodeId);
       const { model } = await cdp('DOM.getBoxModel', { nodeId }) as any;
       const bounds = extractBounds(model);
@@ -381,7 +496,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const childStyles = new Map<string, string>((cs as any[]).map(p => [p.name, p.value]));
           const { model: cm } = await cdp('DOM.getBoxModel', { nodeId: child.nodeId }) as any;
           const childBounds = extractBounds(cm);
-          const { layoutViewport: vp } = await cdp('Page.getLayoutMetrics') as any;
 
           children.push({
             tag: child.localName,
@@ -400,6 +514,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       return ok({
         element: selector,
+        matchCount,
         display,
         isFlexOrGrid,
         containerSize: { width: bounds.width, height: bounds.height },
@@ -416,6 +531,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           : display.includes('grid')
           ? 'Common grid issues: no grid-template-columns defined; grid items escaping with absolute positioning'
           : 'Element is not a flex or grid container. Switch display to flex or grid to use this tool effectively.',
+        ...(matchCount > 1 ? { note: `${matchCount} elements match "${selector}" — only the first was analysed.` } : {}),
       });
     }
 
@@ -424,9 +540,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const selector = args?.selector as string;
       if (!selector) throw new Error('selector is required');
 
-      const nodeId = await resolveNode(selector);
+      const { nodeId, matchCount } = await resolveNode(selector);
       const styles  = await getStyles(nodeId);
       const { model } = await cdp('DOM.getBoxModel', { nodeId }) as any;
+      const bounds = extractBounds(model);
+      const padding = extractPadding(model);
 
       // Get applied CSS rules with selectors (for specificity debugging)
       let appliedRules: any[] = [];
@@ -441,9 +559,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       return ok({
         selector,
+        matchCount,
         boxModel: {
-          content: { width: model.width, height: model.height },
-          padding: `${model.width - model.content[2] + model.content[0]}px`,
+          content:   { width: bounds.width, height: bounds.height },
+          padding:   { top: padding.top, right: padding.right, bottom: padding.bottom, left: padding.left },
+          borderBox: { width: bounds.width, height: bounds.height, top: bounds.top, left: bounds.left },
         },
         layout: pick(styles, [
           'display','position','top','right','bottom','left',
@@ -455,6 +575,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         visual: pick(styles, ['overflow','z-index','opacity','visibility','transform','filter','pointer-events']),
         typography: pick(styles, ['font-size','font-weight','line-height','color','background-color']),
         appliedRules: appliedRules.length > 0 ? appliedRules : 'Run from an active tab with CSS loaded',
+        ...(matchCount > 1 ? { note: `${matchCount} elements match "${selector}" — only the first was analysed.` } : {}),
       });
     }
 
@@ -464,7 +585,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const duration = (args?.duration as number) ?? 3000;
       if (!selector) throw new Error('selector is required');
 
-      const nodeId = await resolveNode(selector);
+      const { nodeId, matchCount } = await resolveNode(selector);
       await cdp('DOM.highlightNode', {
         nodeId,
         highlightConfig: {
@@ -479,7 +600,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       if (duration > 0) setTimeout(() => cdp('DOM.hideHighlight', {}).catch(() => {}), duration);
 
-      return ok({ success: true, selector, duration, message: `Element highlighted in browser for ${duration}ms` });
+      return ok({
+        success: true,
+        selector,
+        matchCount,
+        duration,
+        message: duration > 0
+          ? `Element highlighted in browser for ${duration}ms`
+          : 'Element highlighted permanently — call highlight_element again or DOM.hideHighlight to clear',
+        ...(matchCount > 1 ? { note: `${matchCount} elements match "${selector}" — only the first was highlighted.` } : {}),
+      });
     }
 
     // ── screenshot_element ────────────────────────────────────────────────────
@@ -487,12 +617,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const selector = args?.selector as string;
       if (!selector) throw new Error('selector is required');
 
-      const nodeId = await resolveNode(selector);
+      const { nodeId, matchCount } = await resolveNode(selector);
       const { model } = await cdp('DOM.getBoxModel', { nodeId }) as any;
-      const clip = { x: model.content[0], y: model.content[1], width: model.width, height: model.height, scale: 1 };
+      const bounds = extractBounds(model);
+
+      // Scroll the element into view first so we don't capture empty space
+      // when the element is currently outside the viewport.
+      try {
+        await cdp('DOM.scrollIntoViewIfNeeded', { nodeId });
+      } catch { /* best-effort */ }
+
+      // Honour device pixel ratio for crisp output on retina displays.
+      let scale = 1;
+      try {
+        const metrics = await cdp('Page.getLayoutMetrics') as any;
+        scale = metrics?.cssLayoutViewport?.clientWidth && metrics?.cssLayoutViewport
+          ? (metrics as any).cssLayoutViewport?.scale ?? 1
+          : 1;
+        if (!Number.isFinite(scale) || scale <= 0) scale = 1;
+      } catch { /* best-effort */ }
+
+      const clip = { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height, scale };
       const { data } = await cdp('Page.captureScreenshot', { clip, format: 'png' }) as any;
 
-      return ok({ selector, screenshot: `data:image/png;base64,${data}`, bounds: clip });
+      return ok({
+        selector,
+        matchCount,
+        screenshot: `data:image/png;base64,${data}`,
+        bounds: clip,
+        ...(matchCount > 1 ? { note: `${matchCount} elements match "${selector}" — only the first was captured.` } : {}),
+      });
     }
 
     // ── get_page_performance ──────────────────────────────────────────────────
@@ -502,7 +656,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Count potentially layout-thrashing elements (those with position:fixed/absolute, transform, etc.)
       let heavyElements = 0;
       try {
-        const { root } = await cdp('DOM.getDocument', { depth: 1 }) as any;
         const result = await cdp('Runtime.evaluate', {
           expression: `(() => {
             const all = document.querySelectorAll('*');
@@ -514,6 +667,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             return heavy;
           })()`,
           returnByValue: true,
+          // Run with a user gesture-like default so it doesn't block; large
+          // pages can take a while here.
+          awaitPromise: false,
         }) as any;
         heavyElements = result?.result?.value ?? 0;
       } catch { /* best-effort */ }
@@ -624,7 +780,7 @@ export class GravityMCPServer {
     await startBridge();
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error('[gravity] MCP server ready — 11 tools loaded');
+    console.error(`[gravity] MCP server ready — ${TOOLS.length} tools loaded (v${pkg.version})`);
     process.on('SIGINT',  () => process.exit(0));
     process.on('SIGTERM', () => process.exit(0));
   }

@@ -128,7 +128,19 @@ gravity doctor    # check setup and print the extension folder path
 
 | Variable | Default | Description |
 |---|---|---|
-| `GRAVITY_PORT` | `9224` | WebSocket bridge port |
+| `GRAVITY_PORT` | `9224` | WebSocket bridge port (set in both MCP config *and* the popup) |
+| `GRAVITY_CDP_TIMEOUT_MS` | `10000` | Per-CDP-call timeout in ms (0 = no timeout) |
+
+**Changing the port:** When you set `GRAVITY_PORT` in your MCP config, the server listens on that port — but the extension still defaults to 9224. Use the popup's **MCP port** field to point the extension at the same port. Both sides must agree.
+
+---
+
+## Security note
+
+The WebSocket bridge binds to `127.0.0.1` only — it is not exposed to the network. However, any process on the local machine can connect to it and drive Chrome through CDP (read the DOM, take screenshots, evaluate JavaScript). If this is a concern in your environment, consider:
+
+1. Running the bridge behind a local firewall rule
+2. Using a per-connection token (future versions may add optional auth)
 
 ---
 
@@ -137,7 +149,7 @@ gravity doctor    # check setup and print the extension folder path
 | Problem | Fix |
 |---|---|
 | "Browser extension not connected" | Open Chrome, load the extension, click "Connect to Tab" |
-| "Port 9224 already in use" | Set `GRAVITY_PORT=9225` in your MCP config |
+| "Port 9224 already in use" | Set `GRAVITY_PORT=9225` in your MCP config **and** update the popup port field |
 | MCP server dot stays red in popup | Make sure `gravity` is running — check IDE MCP status panel |
 | "Element not found: #selector" | Verify the selector exists on the current page |
 | Chrome version error | The offscreen API requires Chrome 116 or later |

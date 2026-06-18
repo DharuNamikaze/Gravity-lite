@@ -59,19 +59,35 @@ async function ensureOffscreen() {
   });
 }
 
-// Close the offscreen doc so it will be recreated with the new port next time.
-async function restartOffscreen() {
+// Restart the offscreen doc with a (possibly) new port.
+//
+// Chrome does NOT let us create a second offscreen document, and there is no
+// public API to mutate a running doc. The reliable cross-version approach is:
+//   1. closeDocument() (Chrome 117+)
+//   2. createDocument() again with the new port
+// If closeDocument is unavailable we fall back to asking the existing doc
+// to reconfigure itself in-place (older Chrome).
+async function restartOffscreen(newPort) {
   const existing = await chrome.offscreen.hasDocument().catch(() => false);
-  if (existing) {
-    // There is no chrome.offscreen.closeDocument, but closing the WS inside
-    // the doc causes it to reconnect with whatever port it was started with.
-    // The only reliable way to change the port is to force a reload of the doc.
-    // We achieve this by sending a 'reconfigure' message with the new port.
-    const port = await getPort();
-    chrome.runtime.sendMessage({ to: 'offscreen', type: 'reconfigure', port }).catch(() => {});
-  } else {
+  if (!existing) {
     await ensureOffscreen();
+    return;
   }
+
+  if (typeof chrome.offscreen.closeDocument === 'function') {
+    try {
+      await chrome.offscreen.closeDocument();
+    } catch (_) { /* ignore */ }
+    await chrome.offscreen.createDocument({
+      url: `offscreen.html?port=${newPort}`,
+      reasons: ['WORKERS'],
+      justification: 'Maintain persistent WebSocket connection to local MCP server bridge',
+    }).catch(() => {});
+    return;
+  }
+
+  // Fallback (older Chrome): ask the existing doc to reconfigure in place.
+  chrome.runtime.sendMessage({ to: 'offscreen', type: 'reconfigure', port: newPort }).catch(() => {});
 }
 
 // ── Message routing ───────────────────────────────────────────────────────────
@@ -89,7 +105,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
 
     if (msg.type === 'cdp_request') {
-      // Execute CDP via chrome.debugger, send response back to offscreen
       const { id, method, params } = msg.payload;
 
       if (!debuggerState.attached || !debuggerState.tabId) {
@@ -101,6 +116,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
 
+      // Performance metrics & accessibility tree need their own CDP domains
+      // enabled, otherwise the commands always error out. The domains list
+      // below mirrors what enableCDPDomains() turns on at attach time.
       chrome.debugger.sendCommand({ tabId: debuggerState.tabId }, method, params || {}, (result) => {
         const response = chrome.runtime.lastError
           ? { type: 'cdp_response', id, error: { message: chrome.runtime.lastError.message } }
@@ -142,7 +160,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
     chrome.storage.local.set({ gravityPort: p }, async () => {
       wsConnected = false;
-      await restartOffscreen();
+      await restartOffscreen(p);
       sendResponse({ success: true, port: p });
     });
     return true; // async
@@ -206,8 +224,11 @@ function detachDebugger(callback) {
   });
 }
 
+// CDP domains the tools rely on. Must include Performance (for
+// get_page_performance) and Accessibility (for check_accessibility) — without
+// these enabled, those tools silently get empty results.
 function enableCDPDomains(tabId, done) {
-  const domains = ['DOM', 'CSS', 'Page', 'Overlay'];
+  const domains = ['DOM', 'CSS', 'Page', 'Overlay', 'Performance', 'Accessibility'];
   let i = 0;
   const next = () => {
     if (i >= domains.length) return done();
@@ -235,9 +256,19 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   chrome.runtime.sendMessage({ action: 'debugger_detached', tabId: source.tabId, reason }).catch(() => {});
 });
 
+// Navigation handling. CDP domains are torn down on navigation, so we must
+// re-enable them on 'complete' — otherwise tools work against a half-ready
+// page and the popup shows a misleading "Attaching…" state forever.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (tabId === debuggerState.tabId && changeInfo.status === 'loading') {
+  if (tabId !== debuggerState.tabId) return;
+  if (changeInfo.status === 'loading') {
     debuggerState.domainsEnabled = false;
+  }
+  if (changeInfo.status === 'complete' && debuggerState.attached) {
+    enableCDPDomains(tabId, () => {
+      debuggerState.domainsEnabled = true;
+      chrome.runtime.sendMessage({ action: 'debugger_ready' }).catch(() => {});
+    });
   }
 });
 

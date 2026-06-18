@@ -81,10 +81,11 @@ toggleBtn.addEventListener('click', () => {
   });
 });
 
-// Listen for real-time status pushes from SW (ws_status_update)
+// Listen for real-time status pushes from SW (ws_status_update + debugger_ready)
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'ws_status_update') refresh();
   if (msg.action === 'debugger_detached') refresh();
+  if (msg.action === 'debugger_ready') refresh();
 });
 
 // Port change

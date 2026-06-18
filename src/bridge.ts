@@ -10,16 +10,24 @@
 import { WebSocketServer, WebSocket } from 'ws';
 
 const PORT = process.env.GRAVITY_PORT ? Number(process.env.GRAVITY_PORT) : 9224;
-const CDP_TIMEOUT_MS = 10_000;
+// Per-call timeout. Overridable for slow / huge pages. 0 = no timeout.
+const CDP_TIMEOUT_MS = Number(process.env.GRAVITY_CDP_TIMEOUT_MS ?? 10_000);
 
 let extensionSocket: WebSocket | null = null;
 let msgIdCounter = 1;
 
-const pending = new Map<number, {
+interface Pending {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
   timer: NodeJS.Timeout;
-}>();
+  // Tagged with the socket that initiated the request, so that a response
+  // arriving on a *different* (newer) socket after a reconnect is treated
+  // as a stale response and ignored — and so we only reject requests that
+  // truly belonged to a disconnected socket.
+  socket: WebSocket;
+}
+
+const pending = new Map<number, Pending>();
 
 // ── Start the bridge server ───────────────────────────────────────────────────
 
@@ -48,9 +56,11 @@ export function startBridge(): Promise<void> {
       const origin = req.headers.origin ?? 'unknown';
       console.error(`[gravity] extension connected (origin: ${origin})`);
 
-      // Only one extension at a time — close the old one
-      if (extensionSocket && extensionSocket.readyState === WebSocket.OPEN) {
-        extensionSocket.close();
+      // Only one extension at a time — close the old one.
+      // NOTE: we close the PREVIOUS socket, not the incoming one. Any in-flight
+      // requests on the old socket will be rejected by its own close handler.
+      if (extensionSocket && extensionSocket !== ws && extensionSocket.readyState === WebSocket.OPEN) {
+        try { extensionSocket.close(); } catch { /* ignore */ }
       }
       extensionSocket = ws;
 
@@ -66,6 +76,9 @@ export function startBridge(): Promise<void> {
           if (msg.type === 'cdp_response') {
             const p = pending.get(msg.id);
             if (p) {
+              // Ignore stale responses that arrive on a different socket than
+              // the one that sent the original request.
+              if (p.socket !== ws) return;
               clearTimeout(p.timer);
               pending.delete(msg.id);
               if (msg.error) {
@@ -83,11 +96,14 @@ export function startBridge(): Promise<void> {
       ws.on('close', () => {
         console.error('[gravity] extension disconnected');
         if (extensionSocket === ws) extensionSocket = null;
-        // Reject all pending requests
+        // Reject only the requests that belonged to THIS socket. Any newer
+        // socket's in-flight requests must be left alone.
         for (const [id, p] of pending) {
-          clearTimeout(p.timer);
-          p.reject(new Error('Extension disconnected'));
-          pending.delete(id);
+          if (p.socket === ws) {
+            clearTimeout(p.timer);
+            pending.delete(id);
+            p.reject(new Error('Extension disconnected'));
+          }
         }
       });
 
@@ -101,7 +117,8 @@ export function startBridge(): Promise<void> {
 // ── Send a CDP command through the extension ──────────────────────────────────
 
 export function sendCDP(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
-  if (!extensionSocket || extensionSocket.readyState !== WebSocket.OPEN) {
+  const socket = extensionSocket;
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
     return Promise.reject(new Error(
       'Browser extension not connected. ' +
       'Make sure Chrome is open, the Gravity extension is loaded, ' +
@@ -112,13 +129,25 @@ export function sendCDP(method: string, params: Record<string, unknown> = {}): P
   const id = msgIdCounter++;
 
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error(`CDP ${method} timed out after ${CDP_TIMEOUT_MS}ms`));
-    }, CDP_TIMEOUT_MS);
+    const timer = CDP_TIMEOUT_MS > 0
+      ? setTimeout(() => {
+          pending.delete(id);
+          reject(new Error(`CDP ${method} timed out after ${CDP_TIMEOUT_MS}ms`));
+        }, CDP_TIMEOUT_MS)
+      : null;
 
-    pending.set(id, { resolve, reject, timer });
-    extensionSocket!.send(JSON.stringify({ type: 'cdp_request', id, method, params }));
+    pending.set(id, { resolve, reject, timer: timer as NodeJS.Timeout, socket });
+
+    socket.send(JSON.stringify({ type: 'cdp_request', id, method, params }), (err) => {
+      // send() can fail asynchronously (e.g. socket died between the OPEN
+      // check and the actual flush). Surface that as a rejection instead of
+      // hanging until the timeout fires.
+      if (err) {
+        if (timer) clearTimeout(timer);
+        pending.delete(id);
+        reject(new Error(`Failed to send CDP ${method}: ${err.message}`));
+      }
+    });
   });
 }
 

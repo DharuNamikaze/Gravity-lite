@@ -28,14 +28,16 @@ program
   .command('doctor')
   .description('Check setup status and print instructions')
   .action(async () => {
-    const { default: WebSocket } = await import('ws');
+    const net = await import('net');
     const port = process.env.GRAVITY_PORT ? Number(process.env.GRAVITY_PORT) : 9224;
 
     console.log('\nGravity v' + pkg.version + ' — setup check');
     console.log('─'.repeat(40));
 
-    // Node version
-    const nodeOk = parseInt(process.version.slice(1)) >= 16;
+    // Node version — robust parse of "v16.5.0"
+    const nodeVersionMatch = process.version.match(/^v(\d+)/);
+    const nodeMajor = nodeVersionMatch ? parseInt(nodeVersionMatch[1], 10) : 0;
+    const nodeOk = nodeMajor >= 16;
     console.log(`${nodeOk ? '✓' : '✗'} Node.js ${process.version}${nodeOk ? '' : ' (need ≥16)'}`);
 
     // Extension folder
@@ -44,17 +46,17 @@ program
     console.log(`${extOk ? '✓' : '✗'} Extension folder: ${extDir}`);
     if (!extOk) console.log('  ↳ Run: npm install -g gravity-lite');
 
-    // Port availability / existing server
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-        const t = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 2000);
-        ws.on('open',  () => { clearTimeout(t); ws.close(); resolve(); });
-        ws.on('error', (e) => { clearTimeout(t); reject(e); });
-      });
-      console.log(`✓ MCP server is running on port ${port}`);
-    } catch {
-      console.log(`✗ MCP server not running on port ${port}`);
+    // Port availability. IMPORTANT: we do NOT open a WebSocket to probe —
+    // opening a real WS would be treated by the bridge as a new extension
+    // connection and would kick the real extension's socket off (the bridge
+    // only allows one client). Instead we do a raw TCP connect+close, which
+    // only tells us whether *something* is listening, without touching the
+    // WS handshake.
+    const inUse = await isPortInUse(net, port);
+    if (inUse) {
+      console.log(`✓ Port ${port} is in use (MCP server likely running)`);
+    } else {
+      console.log(`✗ Port ${port} is free — MCP server is NOT running`);
       console.log('  ↳ Add gravity to your IDE MCP config and restart');
     }
 
@@ -72,12 +74,40 @@ program
     console.log();
   });
 
+/** TCP-only probe: returns true if something is listening on `port`. */
+function isPortInUse(net: typeof import('net'), port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const tester = net.createServer();
+    tester.once('error', () => resolve(true));   // EADDRINUSE → something is there
+    tester.once('listening', () => {
+      tester.close(() => resolve(false));        // free
+    });
+    tester.listen(port, '127.0.0.1');
+  });
+}
+
 // ── default: run MCP server ───────────────────────────────────────────────────
 
 program.action(async () => {
+  // If the dist build is missing (e.g. cloned from git without `npm run
+  // build`), fail with a clear message instead of an obscure import error.
+  const distCli = resolve(__dirname, 'cli.js');
+  if (!existsSync(distCli)) {
+    console.error('[gravity] dist/ not found. Run `npm run build` first.');
+    process.exit(1);
+  }
+
   const { GravityMCPServer } = await import('./mcp-server.js');
   const srv = new GravityMCPServer();
-  await srv.run();
+  // Catch bridge errors (port in use, etc.) cleanly instead of becoming an
+  // unhandled promise rejection.
+  try {
+    await srv.run();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[gravity] failed to start: ${msg}`);
+    process.exit(1);
+  }
 });
 
 program.parse();
