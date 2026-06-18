@@ -1,6 +1,6 @@
 {
   "name": "gravity-lite",
-  "version": "3.0.5",
+  "version": "3.0.6",
   "description": "AI-powered CSS layout diagnostics — zero-config MCP server for developers",
   "type": "module",
   "bin": {
